@@ -24,19 +24,29 @@
 
 use core::sync::atomic::AtomicBool;
 
-use crate::{adi::AdiPort, screen::Screen, smart::SmartPort};
+use crate::{
+    adi::AdiPort,
+    controller::{Controller, ControllerId},
+    screen::Screen,
+    smart::SmartPort,
+};
 
 static PERIPHERALS_TAKEN: AtomicBool = AtomicBool::new(false);
 
-#[derive(Debug)]
 /// A struct that contains all ports on the V5 Brain
 /// and guarentees **at compile time** that each port is only used once.
 /// Because of the fact that this checks at compile time, it cannot be moved once it has been used to create a device.
 /// If you need to store a peripherals struct for use in multiple functions, use [`DynamicPeripherals`] instead.
 /// This struct is always preferred over [`DynamicPeripherals`] when possible.
+#[derive(Debug)]
 pub struct Peripherals {
     /// Brain screen
     pub screen: Screen,
+
+    /// Master controller
+    pub primary_controller: Controller,
+    /// Partner controller
+    pub partner_controller: Controller,
 
     /// Smart port 1 on the brain
     pub port_1: SmartPort,
@@ -107,6 +117,9 @@ impl Peripherals {
             Self {
                 screen: Screen::new(),
 
+                primary_controller: Controller::new(ControllerId::Primary),
+                partner_controller: Controller::new(ControllerId::Partner),
+
                 port_1: SmartPort::new(1),
                 port_2: SmartPort::new(2),
                 port_3: SmartPort::new(3),
@@ -174,6 +187,8 @@ impl Peripherals {
 #[derive(Debug)]
 pub struct DynamicPeripherals {
     screen: bool,
+    master_controller: bool,
+    partner_controller: bool,
     smart_ports: [bool; 21],
     adi_slots: [bool; 8],
 }
@@ -184,12 +199,12 @@ impl DynamicPeripherals {
     /// This guarentees safety because [`Peripherals`] cannot be passed by value
     /// after they have been used to create devices.
     pub fn new(_peripherals: Peripherals) -> Self {
-        let smart_ports = [false; 21];
-        let adi_slots = [false; 8];
         Self {
             screen: false,
-            smart_ports,
-            adi_slots,
+            master_controller: false,
+            partner_controller: false,
+            smart_ports: [false; 21],
+            adi_slots: [false; 8],
         }
     }
 
@@ -221,6 +236,26 @@ impl DynamicPeripherals {
         }
         self.smart_ports[port_index] = true;
         Some(unsafe { AdiPort::new(port_index as u8 + 1, None) })
+    }
+
+    /// Creates a [`Controller`] from an ID variant only if one has not been created before.
+    pub fn take_controller(&mut self, id: ControllerId) -> Option<Controller> {
+        match id {
+            ControllerId::Primary => {
+                if self.master_controller {
+                    return None;
+                }
+                self.master_controller = true;
+            }
+            ControllerId::Partner => {
+                if self.partner_controller {
+                    return None;
+                }
+                self.partner_controller = true;
+            }
+        }
+
+        Some(unsafe { Controller::new(id) })
     }
 
     /// Creates a [`Screen`] only if one has not been created before.
